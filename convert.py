@@ -137,13 +137,18 @@ def process_pdf(pdf_path, output_html_path, is_target=False):
         # 2. Keep all page HTML intact
         cleaned = page_html
 
-        # 3. Filter text <p> elements (remove scattered original header <p> tags only)
+        HEADER_Y_CUTOFF = 200.0   # Remove top header text/patient info above 200pt (cleaned target format)
+        FOOTER_Y_CUTOFF = 680.0  # Remove bottom footer text/page numbers below 680pt
+
+        # 3. Filter text <p> elements (remove top header & bottom footer <p> tags on every page)
         def filter_p(match):
             p_tag = match.group(0)
             top_match = re.search(r'top:([\d\.]+)pt', p_tag)
             if top_match:
                 try:
                     top_val = float(top_match.group(1))
+                    if top_val < HEADER_Y_CUTOFF or top_val > FOOTER_Y_CUTOFF:
+                        return ""
                     for hy0_r, hy1_r in header_y_ranges:
                         if hy0_r <= top_val <= hy1_r:
                             return ""
@@ -190,7 +195,7 @@ def process_pdf(pdf_path, output_html_path, is_target=False):
                     'sx': sx, 'sy': sy, 'tx': tx, 'ty': ty
                 })
 
-            valid_imgs = [info for info in img_infos if -100 <= info['tx'] <= 595.6]
+            valid_imgs = [info for info in img_infos if (-100 <= info['tx'] <= 595.6) and (info['ty'] >= HEADER_Y_CUTOFF) and (info['ty'] <= FOOTER_Y_CUTOFF)]
             for info in img_infos:
                 if info not in valid_imgs:
                     page_html_str = page_html_str.replace(info['tag'], '')
@@ -272,8 +277,9 @@ vendor_pdf = Path("vendor pdf.pdf")
 if not vendor_pdf.exists():
     vendor_pdf = Path("result.pdf")
 
-process_pdf(str(vendor_pdf), output_dir / "target.html", is_target=True)
-shutil.copy(output_dir / "target.html", "target.html")
+if vendor_pdf.exists():
+    process_pdf(str(vendor_pdf), output_dir / "cleaned_target.html", is_target=True)
+    shutil.copy(output_dir / "cleaned_target.html", "cleaned_target.html")
 
 # --- RENDER PDFS VIA PLAYWRIGHT ---
 print("\nConverting HTML + CSS to PDF using Playwright (Chromium)...")
@@ -281,20 +287,13 @@ print("\nConverting HTML + CSS to PDF using Playwright (Chromium)...")
 with sync_playwright() as p:
     browser = p.chromium.launch()
 
-    # Render index.html -> final_output.pdf
-    if (output_dir / "index.html").exists():
-        page_idx = browser.new_page(viewport={"width": 1000, "height": 1200})
-        page_idx.goto((output_dir / "index.html").absolute().as_uri(), wait_until="networkidle")
-        page_idx.screenshot(path=str(output_dir / "index_page1_preview.png"), full_page=False)
-        page_idx.pdf(path=str(output_dir / "final_output.pdf"), print_background=True, prefer_css_page_size=True, margin={"top": "0px", "right": "0px", "bottom": "0px", "left": "0px"})
-        page_idx.close()
-
-    # Render target.html -> target_output.pdf
-    if (output_dir / "target.html").exists():
+    # Render cleaned_target.html -> result.pdf
+    if (output_dir / "cleaned_target.html").exists():
         page_tgt = browser.new_page(viewport={"width": 1000, "height": 1200})
-        page_tgt.goto((output_dir / "target.html").absolute().as_uri(), wait_until="networkidle")
-        page_tgt.screenshot(path=str(output_dir / "target_page1_preview.png"), full_page=False)
-        page_tgt.pdf(path=str(output_dir / "target_output.pdf"), print_background=True, prefer_css_page_size=True, margin={"top": "0px", "right": "0px", "bottom": "0px", "left": "0px"})
+        page_tgt.goto((output_dir / "cleaned_target.html").absolute().as_uri(), wait_until="networkidle")
+        page_tgt.screenshot(path=str(output_dir / "cleaned_target_preview.png"), full_page=False)
+        page_tgt.pdf(path=str(output_dir / "result.pdf"), print_background=True, prefer_css_page_size=True, margin={"top": "0px", "right": "0px", "bottom": "0px", "left": "0px"})
+        shutil.copy(output_dir / "result.pdf", "result.pdf")
         page_tgt.close()
 
     browser.close()

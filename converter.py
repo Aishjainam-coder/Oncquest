@@ -151,13 +151,18 @@ def process_pdf(pdf_input, output_html_path, is_target=False):
         # 2. Keep all page HTML intact
         cleaned = page_html
 
-        # 3. Filter text <p> elements (remove scattered original header <p> tags only)
+        HEADER_Y_CUTOFF = 200.0   # Remove top header text/patient info above 200pt (cleaned target format)
+        FOOTER_Y_CUTOFF = 680.0  # Remove bottom footer text/page numbers below 680pt
+
+        # 3. Filter text <p> elements (remove top header & bottom footer <p> tags on every page)
         def filter_p(match):
             p_tag = match.group(0)
             top_match = re.search(r'top:([\d\.]+)pt', p_tag)
             if top_match:
                 try:
                     top_val = float(top_match.group(1))
+                    if top_val < HEADER_Y_CUTOFF or top_val > FOOTER_Y_CUTOFF:
+                        return ""
                     for hy0_r, hy1_r in header_y_ranges:
                         if hy0_r <= top_val <= hy1_r:
                             return ""
@@ -204,7 +209,7 @@ def process_pdf(pdf_input, output_html_path, is_target=False):
                     'sx': sx, 'sy': sy, 'tx': tx, 'ty': ty
                 })
 
-            valid_imgs = [info for info in img_infos if -100 <= info['tx'] <= 595.6]
+            valid_imgs = [info for info in img_infos if (-100 <= info['tx'] <= 595.6) and (info['ty'] >= HEADER_Y_CUTOFF) and (info['ty'] <= FOOTER_Y_CUTOFF)]
             for info in img_infos:
                 if info not in valid_imgs:
                     page_html_str = page_html_str.replace(info['tag'], '')
